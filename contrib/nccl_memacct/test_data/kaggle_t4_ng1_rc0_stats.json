@@ -1,0 +1,11 @@
+{
+  "env": {"NCCL_RUNTIME_CONNECT": "0", "NCCL_CUMEM_ENABLE": null, "NCCL_NVLS_ENABLE": null, "NCCL_P2P_DISABLE": null, "NCCL_SHM_DISABLE": null, "NCCL_PROTO": null, "NCCL_ALGO": null, "NCCL_MIN_NCHANNELS": null, "NCCL_MAX_NCHANNELS": null},
+  "bytes": 1048576,
+  "snapshots": [
+    {"pid": 17583, "rank": 0, "nranks": 1, "dev": 0, "stage": "before_init", "cuda_free": 15523971072, "cuda_total": 15636037632, "nccl_stats": "unavailable"},
+    {"pid": 17583, "rank": 0, "nranks": 1, "dev": 0, "stage": "init", "cuda_free": 14506852352, "cuda_total": 15636037632, "nccl_stats": {"total": 406847488, "persist": 4194304, "suspend": 402653184}},
+    {"pid": 17583, "rank": 0, "nranks": 1, "dev": 0, "stage": "allreduce", "cuda_free": 14506852352, "cuda_total": 15636037632, "nccl_stats": {"total": 406847488, "persist": 4194304, "suspend": 402653184}},
+    {"pid": 17583, "rank": 0, "nranks": 1, "dev": 0, "stage": "reducescatter", "cuda_free": 14506852352, "cuda_total": 15636037632, "nccl_stats": {"total": 406847488, "persist": 4194304, "suspend": 402653184}},
+    {"pid": 17583, "rank": 0, "nranks": 1, "dev": 0, "stage": "sendrecv_alltoall", "cuda_free": 14506852352, "cuda_total": 15636037632, "nccl_stats": {"total": 406847488, "persist": 4194304, "suspend": 402653184}}
+  ]
+}

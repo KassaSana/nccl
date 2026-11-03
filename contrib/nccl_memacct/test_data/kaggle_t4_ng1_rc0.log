@@ -1,0 +1,22 @@
+# Excerpt of a real NCCL v2.32.3-1 log: Kaggle, 1x Tesla T4, CUDA 12.8, NCCL_RUNTIME_CONNECT=0, NCCL_DEBUG_SUBSYS=ALLOC.
+# Hostname replaced with 'host'. Lines kept in original order; the full log has 192 initChannel and 2 devCommSetup allocation lines, only the first 6 are kept.
+NCCL_MEMACCT begin=init pid=17583
+host:17583:17583 [0] NCCL INFO NCCL version 2.32.3+cuda12.8
+host:17583:17583 [0] NCCL INFO NCCL git version HEAD 12df1a1
+
+host:17583:17583 [0] plugin/net.cc:229 (ncclNetPluginInit) NCCL ATTN Failed to initialize NET plugin IB
+
+host:17583:17583 [0] transport/rma_socket.cc:32 (ncclRmaSocketProxyInit) NCCL WARN RMA/Socket : rma_socket requires GDRCopy; and GDR Copy is not available
+host:17583:17583 [0] NCCL INFO MemManager: Initialized for device 0
+host:17583:17583 [0] NCCL INFO channel.cc:44 (initChannel) Cuda CallocAsync Size 608 pointer 0x7a72d7800000 memType 2
+host:17583:17583 [0] NCCL INFO channel.cc:48 (initChannel) Cuda CallocAsync Size 24 pointer 0x7a72d7a00000 memType 2
+host:17583:17583 [0] NCCL INFO channel.cc:60 (initChannel) Cuda CallocAsync Size 4 pointer 0x7a72d7c00000 memType 2
+host:17583:17583 [0] NCCL INFO channel.cc:44 (initChannel) Cuda CallocAsync Size 608 pointer 0x7a72d7e00000 memType 2
+host:17583:17583 [0] NCCL INFO channel.cc:48 (initChannel) Cuda CallocAsync Size 24 pointer 0x7a72d9c00000 memType 2
+host:17583:17583 [0] NCCL INFO channel.cc:60 (initChannel) Cuda CallocAsync Size 4 pointer 0x7a72d9e00000 memType 2
+host:17583:17588 [0] NCCL INFO transport/p2p.cc:258 (ncclP2pAllocateShareableBuffer) Allocated shareable buffer 0xb62000000 size 536870912 ipcDesc 0x7a72c400b430
+NCCL_MEMACCT begin=allreduce pid=17583
+NCCL_MEMACCT begin=reducescatter pid=17583
+NCCL_MEMACCT begin=sendrecv_alltoall pid=17583
+host:17583:17583 [0] NCCL INFO MemManager: Destroying (refCount=0)
+host:17583:17583 [0] NCCL INFO MemManager: Destroyed

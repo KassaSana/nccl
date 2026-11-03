@@ -1,0 +1,32 @@
+# Excerpt of a real NCCL v2.32.3-1 log: Kaggle, 2x Tesla T4 (PHB, SHM transport), CUDA 12.8, NCCL_RUNTIME_CONNECT=1.
+# Hostname replaced with 'host'. Complete allocation lines; SHM legacy lines trimmed to 2.
+NCCL_MEMACCT begin=init pid=17597
+host:17597:17597 [0] NCCL INFO NCCL version 2.32.3+cuda12.8
+host:17597:17597 [0] NCCL INFO NCCL git version HEAD 12df1a1
+host:17597:17603 [1] NCCL INFO MemManager: Initialized for device 1
+host:17597:17602 [0] NCCL INFO MemManager: Initialized for device 0
+host:17597:17603 [1] NCCL INFO channel.cc:44 (initChannel) Cuda CallocAsync Size 1216 pointer 0x7dafc2800000 memType 2
+host:17597:17602 [0] NCCL INFO channel.cc:44 (initChannel) Cuda CallocAsync Size 1216 pointer 0x7dafc2a00000 memType 2
+host:17597:17603 [1] NCCL INFO channel.cc:48 (initChannel) Cuda CallocAsync Size 40 pointer 0x7dafc2c00000 memType 2
+host:17597:17602 [0] NCCL INFO channel.cc:48 (initChannel) Cuda CallocAsync Size 40 pointer 0x7dafc2e00000 memType 2
+host:17597:17603 [1] NCCL INFO channel.cc:60 (initChannel) Cuda CallocAsync Size 8 pointer 0x7dafc3000000 memType 2
+host:17597:17602 [0] NCCL INFO channel.cc:60 (initChannel) Cuda CallocAsync Size 8 pointer 0x7dafc3200000 memType 2
+host:17597:17603 [1] NCCL INFO channel.cc:44 (initChannel) Cuda CallocAsync Size 1216 pointer 0x7dafc3400000 memType 2
+host:17597:17602 [0] NCCL INFO channel.cc:44 (initChannel) Cuda CallocAsync Size 1216 pointer 0x7dafc3600000 memType 2
+host:17597:17603 [1] NCCL INFO channel.cc:48 (initChannel) Cuda CallocAsync Size 40 pointer 0x7dafc3800000 memType 2
+host:17597:17602 [0] NCCL INFO channel.cc:48 (initChannel) Cuda CallocAsync Size 40 pointer 0x7dafc3a00000 memType 2
+host:17597:17603 [1] NCCL INFO channel.cc:60 (initChannel) Cuda CallocAsync Size 8 pointer 0x7dafc3c00000 memType 2
+host:17597:17602 [0] NCCL INFO channel.cc:60 (initChannel) Cuda CallocAsync Size 8 pointer 0x7dafc3e00000 memType 2
+host:17597:17603 [1] NCCL INFO init.cc:725 (devCommSetup) Cuda CallocAsync Size 23648 pointer 0x1292000000 memType 0
+host:17597:17602 [0] NCCL INFO init.cc:725 (devCommSetup) Cuda CallocAsync Size 23648 pointer 0x1292200000 memType 0
+host:17597:17603 [1] NCCL INFO init.cc:727 (devCommSetup) Cuda CallocAsync Size 8 pointer 0x1292400000 memType 0
+host:17597:17602 [0] NCCL INFO init.cc:727 (devCommSetup) Cuda CallocAsync Size 8 pointer 0x1292600000 memType 0
+NCCL_MEMACCT begin=allreduce pid=17597
+NCCL_MEMACCT begin=reducescatter pid=17597
+NCCL_MEMACCT begin=sendrecv_alltoall pid=17597
+host:17597:17597 [0] NCCL INFO MemManager: Destroying (refCount=0)
+host:17597:17597 [0] NCCL INFO MemManager: Destroyed
+host:17597:17597 [1] NCCL INFO MemManager: Destroying (refCount=0)
+host:17597:17597 [1] NCCL INFO MemManager: Destroyed
+host:17597:17606 [0] NCCL INFO SHM legacy: sharing buffer with GPU via cudaHostRegister + cudaHostGetDevicePointer (host 0x7dafac7ea000 size 9637892)
+host:17597:17605 [1] NCCL INFO SHM legacy: sharing buffer with GPU via cudaHostRegister + cudaHostGetDevicePointer (host 0x7dafa47a2000 size 9637892)
