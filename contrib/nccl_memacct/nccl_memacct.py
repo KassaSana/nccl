@@ -4,8 +4,8 @@
 """Report NCCL GPU allocation requests by allocation site and compare them with ncclCommMemStats.
 
 Input is an NCCL log captured with NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=ALLOC, optionally interleaved with
-stage markers and a stats.json written by harness.cc. Output is observed allocation requests, not a
-complete breakdown of live GPU memory: INFO logs miss some allocation paths and never show frees.
+stage markers and a stats.json written by harness.cc or memtrace. Output is observed allocation requests,
+not a complete breakdown of live GPU memory: INFO logs miss some allocation paths and never show frees.
 See README.md for what can and cannot be compared.
 """
 
@@ -155,6 +155,64 @@ def _stats_total(snapshot):
   return stats["total"]
 
 
+def group_snapshots(snapshots):
+  """Collapse per-rank snapshots into one per (pid, dev, stage), keeping first-seen order.
+
+  harness.cc writes one snapshot per device. memtrace writes one per communicator rank, and ranks on the
+  same device repeat the same device-wide cuda_free. tracked_total sums ncclStatGpuMemTotal over the ranks
+  of a device, skipping a rank whose stats_shared_with names another rank: communicators that share a
+  memory manager report the same allocations, so they are counted once (see #2582). tracked_total is None
+  when any counted rank has no stats; a missing value is never treated as 0.
+  """
+  groups = collections.OrderedDict()
+  for s in snapshots:
+    key = (s["pid"], s["dev"], s["stage"])
+    g = groups.get(key)
+    if g is None:
+      g = groups[key] = {"pid": s["pid"], "dev": s["dev"], "stage": s["stage"], "spec": s.get("spec"),
+                         "cuda_free": s.get("cuda_free"), "ranks": [], "tracked_total": 0, "_missing": False}
+    g["ranks"].append(s.get("rank"))
+    shared = s.get("stats_shared_with")
+    if shared is not None and shared >= 0:
+      continue
+    total = _stats_total(s)
+    if total is None:
+      g["_missing"] = True
+    else:
+      g["tracked_total"] += total
+  out = []
+  for g in groups.values():
+    if g.pop("_missing"):
+      g["tracked_total"] = None
+    out.append(g)
+  return out
+
+
+def step_deltas(snapshots):
+  """Per-step changes for each (pid, dev): device-wide used memory and ncclCommMemStats totals.
+
+  device_used_step and tracked_step are the change since the previous stage of the same device, so a
+  step that reuses buffers allocated by an earlier step shows 0 (memory is not additive), and a step
+  that needs new connections shows its own cost. *_cum is the change since the first stage.
+  """
+  rows = []
+  first, prev = {}, {}
+  for g in group_snapshots(snapshots):
+    loc = (g["pid"], g["dev"])
+    free, tracked = g["cuda_free"], g["tracked_total"]
+    base = first.setdefault(loc, free)
+    p = prev.get(loc)
+    rows.append({
+      "pid": g["pid"], "dev": g["dev"], "stage": g["stage"], "spec": g["spec"], "ranks": len(g["ranks"]),
+      "device_used_step": None if p is None or p["free"] is None or free is None else p["free"] - free,
+      "device_used_cum": None if base is None or free is None else base - free,
+      "tracked_total": tracked,
+      "tracked_step": None if p is None or p["tracked"] is None or tracked is None else tracked - p["tracked"],
+    })
+    prev[loc] = {"free": free, "tracked": tracked}
+  return rows
+
+
 def reconcile(records, snapshots, granularity=None):
   """Compare cumulative observed requests with ncclCommMemStats and cudaMemGetInfo at each snapshot.
 
@@ -164,13 +222,14 @@ def reconcile(records, snapshots, granularity=None):
   - device_minus_tracked: device-wide used-memory change since the first snapshot minus
     ncclStatGpuMemTotal. This is an unexplained device-wide difference, not untracked NCCL memory.
   """
+  groups = group_snapshots(snapshots)
   order = []
-  for s in snapshots:
+  for s in groups:
     if s["stage"] not in order:
       order.append(s["stage"])
   baseline_free = {}
   rows = []
-  for s in snapshots:
+  for s in groups:
     pid, dev, stage = s["pid"], s["dev"], s["stage"]
     baseline_free.setdefault((pid, dev), s.get("cuda_free"))
     upto = set(order[:order.index(stage) + 1])
@@ -179,7 +238,7 @@ def reconcile(records, snapshots, granularity=None):
       if r.is_gpu and r.ok and r.pid == pid and r.dev == dev and (r.stage is None or r.stage in upto):
         observed += r.size
         rounded += round_up(r.size, granularity) if granularity else r.size
-    tracked = _stats_total(s)
+    tracked = s["tracked_total"]
     base = baseline_free[(pid, dev)]
     device_used = base - s["cuda_free"] if base is not None and s.get("cuda_free") is not None else None
     rows.append({
@@ -245,10 +304,38 @@ def format_reconcile(rows, fmt="md"):
   return "\n".join(out)
 
 
+def _fmt_mib(v, signed=False):
+  if v is None:
+    return "n/a"
+  return ("%+.2f" if signed else "%.2f") % (v / MiB)
+
+
+def format_steps(rows, fmt="md"):
+  cols = ["pid", "dev", "stage", "spec", "ranks", "device_used_step", "device_used_cum", "tracked_total",
+          "tracked_step"]
+  out = []
+  if fmt == "csv":
+    out.append(",".join(cols))
+    for r in rows:
+      out.append(",".join("" if r[c] is None else ('"%s"' % r[c] if c in ("stage", "spec") else str(r[c]))
+                          for c in cols))
+  else:
+    out.append("| " + " | ".join(cols[:5] + [c + " (MiB)" for c in cols[5:]]) + " |")
+    out.append("|" + "---|" * len(cols))
+    for r in rows:
+      out.append("| %d | %d | %s | %s | %d | %s | %s | %s | %s |" % (
+        r["pid"], r["dev"], r["stage"], "" if r["spec"] is None else "`%s`" % r["spec"], r["ranks"],
+        _fmt_mib(r["device_used_step"], True), _fmt_mib(r["device_used_cum"], True),
+        _fmt_mib(r["tracked_total"]), _fmt_mib(r["tracked_step"], True)))
+  return "\n".join(out)
+
+
 def main(argv=None):
   p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
   p.add_argument("log", help="NCCL log captured with NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=ALLOC")
-  p.add_argument("--stats", help="stats.json written by harness.cc")
+  p.add_argument("--stats", help="stats.json written by harness.cc or memtrace")
+  p.add_argument("--steps", action="store_true",
+                 help="also print per-step deltas (default when the stats file comes from memtrace)")
   p.add_argument("--granularity", type=parse_size, help="cuMem granularity for rounding estimates, e.g. 2MiB")
   p.add_argument("--by", choices=("site", "file"), default="site", help="group by allocation site or source file")
   p.add_argument("--format", choices=("md", "csv"), default="md")
@@ -263,9 +350,13 @@ def main(argv=None):
         % (sum(1 for r in records if r.is_gpu), skipped, host))
   if args.stats:
     with open(args.stats) as f:
-      snapshots = json.load(f)["snapshots"]
+      stats = json.load(f)
+    snapshots = stats["snapshots"]
     print()
     print(format_reconcile(reconcile(records, snapshots, args.granularity), args.format))
+    if args.steps or "steps" in stats:
+      print()
+      print(format_steps(step_deltas(snapshots), args.format))
   return 0
 
 

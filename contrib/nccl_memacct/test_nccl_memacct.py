@@ -258,7 +258,103 @@ class RealLogTest(unittest.TestCase):
     self.assertEqual(per_dev, {0: 16 * MiB, 1: 16 * MiB})
 
 
+def rsnap(stage, free, total, rank, dev=0, spec=None, shared=-1, pid=100):
+  # One memtrace snapshot: per communicator rank, device-wide cuda_free repeated for ranks on a device.
+  stats = "unavailable" if total is None else {"total": total, "persist": 0, "suspend": total}
+  return {"pid": pid, "rank": rank, "nranks": 2, "dev": dev, "stage": stage, "spec": spec,
+          "stats_shared_with": shared, "cuda_free": free, "cuda_total": 16 << 30, "nccl_stats": stats}
+
+
+class MemtraceStatsTest(unittest.TestCase):
+  """Snapshots in the shape memtrace.cc writes: one per rank, several ranks per device."""
+
+  def test_ranks_on_one_device_collapse_and_sum(self):
+    groups = m.group_snapshots([rsnap("init", 900 * MiB, 10 * MiB, 0), rsnap("init", 900 * MiB, 12 * MiB, 1)])
+    self.assertEqual(len(groups), 1)
+    self.assertEqual(groups[0]["tracked_total"], 22 * MiB)
+    self.assertEqual(groups[0]["cuda_free"], 900 * MiB)
+    self.assertEqual(groups[0]["ranks"], [0, 1])
+
+  def test_shared_memory_manager_counted_once(self):
+    groups = m.group_snapshots([rsnap("init", 900 * MiB, 10 * MiB, 0),
+                                rsnap("init", 900 * MiB, 10 * MiB, 1, shared=0)])
+    self.assertEqual(groups[0]["tracked_total"], 10 * MiB)
+
+  def test_one_rank_unavailable_makes_device_total_unknown(self):
+    groups = m.group_snapshots([rsnap("init", 900 * MiB, 10 * MiB, 0), rsnap("init", 900 * MiB, None, 1)])
+    self.assertIsNone(groups[0]["tracked_total"])
+
+  def test_harness_snapshots_unchanged(self):
+    groups = m.group_snapshots([snap("init", 990 * MiB, {"total": 4 * MiB})])
+    self.assertEqual(groups[0]["tracked_total"], 4 * MiB)
+    self.assertEqual(groups[0]["ranks"], [None])
+
+  def test_step_deltas_show_additive_and_reused_memory(self):
+    # before_init -> init -> sendrecv adds 24 MiB -> allreduce 1M adds 24 MiB -> allreduce 64M reuses them.
+    snaps = []
+    for stage, spec, free, total in [("before_init", None, 1000, None), ("init", "init", 900, 16),
+                                     ("s01_sendrecv_1M", "sendrecv:1M", 876, 40),
+                                     ("s02_allreduce_1M", "allreduce:1M", 852, 64),
+                                     ("s03_allreduce_64M", "allreduce:64M", 852, 64)]:
+      for rank in (0, 1):
+        snaps.append(rsnap(stage, free * MiB, None if total is None else total * MiB // 2, rank, spec=spec))
+    rows = m.step_deltas(snaps)
+    self.assertEqual([r["stage"] for r in rows],
+                     ["before_init", "init", "s01_sendrecv_1M", "s02_allreduce_1M", "s03_allreduce_64M"])
+    self.assertEqual([r["device_used_step"] for r in rows], [None, 100 * MiB, 24 * MiB, 24 * MiB, 0])
+    self.assertEqual(rows[-1]["device_used_cum"], 148 * MiB)
+    self.assertEqual([r["tracked_step"] for r in rows], [None, None, 24 * MiB, 24 * MiB, 0])
+    self.assertEqual(rows[2]["ranks"], 2)
+
+  def test_step_deltas_keep_devices_apart(self):
+    snaps = [rsnap("init", 900 * MiB, 8 * MiB, 0, dev=0), rsnap("init", 800 * MiB, 8 * MiB, 1, dev=1),
+             rsnap("s01_allreduce_1M", 890 * MiB, 18 * MiB, 0, dev=0),
+             rsnap("s01_allreduce_1M", 800 * MiB, 8 * MiB, 1, dev=1)]
+    rows = m.step_deltas(snaps)
+    self.assertEqual([(r["dev"], r["device_used_step"]) for r in rows],
+                     [(0, None), (1, None), (0, 10 * MiB), (1, 0)])
+
+  def test_reconcile_one_row_per_device_with_several_ranks(self):
+    recs = m.parse_log([marker("init"), line("Cuda Calloc", 4 * MiB, "0x1")])
+    rows = m.reconcile(recs, [rsnap("before_init", 1000 * MiB, None, 0), rsnap("before_init", 1000 * MiB, None, 1),
+                              rsnap("init", 990 * MiB, 2 * MiB, 0), rsnap("init", 990 * MiB, 2 * MiB, 1)])
+    self.assertEqual(len(rows), 2)
+    self.assertEqual(rows[1]["tracked_total"], 4 * MiB)
+    self.assertEqual(rows[1]["tracked_minus_observed"], 0)
+    self.assertEqual(rows[1]["device_minus_tracked"], 6 * MiB)
+
+
 class CliTest(unittest.TestCase):
+  def test_memtrace_stats_print_steps(self):
+    with tempfile.TemporaryDirectory() as d:
+      log = os.path.join(d, "nccl.log")
+      stats = os.path.join(d, "memtrace.json")
+      with open(log, "w") as f:
+        f.writelines([marker("init"), line("Cuda Calloc", 4096, "0x1")])
+      with open(stats, "w") as f:
+        json.dump({"tool": "memtrace", "steps": [{"step": 1, "stage": "s01_allreduce_1M"}],
+                   "snapshots": [rsnap("before_init", 100 * MiB, None, 0), rsnap("init", 96 * MiB, 2 * MiB, 0),
+                                 rsnap("s01_allreduce_1M", 94 * MiB, 4 * MiB, 0, spec="allreduce:1M")]}, f)
+      out = io.StringIO()
+      with redirect_stdout(out):
+        self.assertEqual(m.main([log, "--stats", stats]), 0)
+      text = out.getvalue()
+      self.assertIn("| 100 | 0 | s01_allreduce_1M | `allreduce:1M` | 1 | +2.00 | +6.00 | 4.00 | +2.00 |", text)
+
+  def test_harness_stats_no_steps_unless_asked(self):
+    with tempfile.TemporaryDirectory() as d:
+      log = os.path.join(d, "nccl.log")
+      stats = os.path.join(d, "stats.json")
+      with open(log, "w") as f:
+        f.write(marker("init"))
+      with open(stats, "w") as f:
+        json.dump({"snapshots": [snap("init", 96 * MiB, {"total": 0})]}, f)
+      for argv, expect in (([log, "--stats", stats], False), ([log, "--stats", stats, "--steps"], True)):
+        out = io.StringIO()
+        with redirect_stdout(out):
+          m.main(argv)
+        self.assertEqual("device_used_step" in out.getvalue(), expect)
+
   def test_end_to_end(self):
     with tempfile.TemporaryDirectory() as d:
       log = os.path.join(d, "nccl.log")
